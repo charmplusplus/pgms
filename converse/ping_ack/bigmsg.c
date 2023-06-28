@@ -65,8 +65,8 @@ void bigmsg_init()
   struct myMsg *msg;
   int totalpes = CmiNumPes(); //p=num_pes
   int pes_per_node = totalpes/2; //q=p/2
-  if (CmiNumNodes()<2) {
-    CmiPrintf("note: this test requires at least 2 nodes, skipping test.\n");
+  if (CmiNumPes()%2 !=0) {
+    CmiPrintf("note: this test requires at multiple of 2 pes, skipping test.\n");
     CmiPrintf("exiting.\n");
     CsdExitScheduler();
     Cpm_bigmsg_stop(CpmSend(CpmALL));
