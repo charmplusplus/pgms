@@ -23,12 +23,6 @@ typedef struct myMsg
   int payload[1];
 } *message;
 
-typedef struct shortMsg
-{ 
-  char header[CmiMsgHeaderSizeBytes];
-  int dummy;
-} *short_message;
-
 CpmInvokable bigmsg_stop()
 {
   CsdExitScheduler();
@@ -42,7 +36,6 @@ void send_msg() {
   for(k=0;k<MSG_COUNT;k++) {
     crt_time = CmiWallTimer();
     msg = (message)CmiAlloc(CpvAccess(msg_size)/*sizeof(struct myMsg)*/);
-    //for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
     CmiSetHandler(msg, CpvAccess(bigmsg_index));
     CpvAccess(process_time) = CmiWallTimer() - crt_time + CpvAccess(process_time);
     start_time = CmiWallTimer();
@@ -54,8 +47,7 @@ void send_msg() {
 
 
 void shortmsg_handler(void *vmsg) {
-//  CmiPrintf("\nShort msg received on PE %d", CmiMyPe());
-  short_message smsg = (short_message)vmsg;
+  message smsg = (message)vmsg;
   CmiFree(smsg);
   CpvAccess(msg_size) = (CpvAccess(msg_size)-CmiMsgHeaderSizeBytes)*2+CmiMsgHeaderSizeBytes;
   send_msg();
@@ -69,21 +61,10 @@ void bigmsg_handler(void *vmsg)
     CpvAccess(recv_count) = 1 + CpvAccess(recv_count);
     if(CpvAccess(recv_count) == MSG_COUNT) {
       CpvAccess(recv_count) = 0;
-//      CmiPrintf("\nTesting recvd data on rank %d", CmiMyRank());
-/*
-      for (i=0; i<MSG_SIZE; i++) {
-        //if (msg->payload[i] != i) 
-        {
-          CmiPrintf("Failure in bigmsg test, data corrupted.\n");
-          exit(1);
-        }
-      }
-*/
       CmiFree(msg);
-      msg = (message)CmiAlloc(CpvAccess(msg_size)/*sizeof(struct myMsg)*/);
-//      for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
+      msg = (message)CmiAlloc(CpvAccess(msg_size));
       CmiSetHandler(msg, CpvAccess(bigmsg_index));
-      CmiSyncSendAndFree(0, CpvAccess(msg_size)/*sizeof(struct myMsg)*/, msg);
+      CmiSyncSendAndFree(0, CpvAccess(msg_size), msg);
     } else
       CmiFree(msg);
   } else { //Pe-0 receives all acks
@@ -100,9 +81,10 @@ void bigmsg_handler(void *vmsg)
       else {
  //       CmiPrintf("\nSending short msgs from PE-%d", CmiMyPe());
         for(pe=0;pe<CmiNumPes()/2;pe++) {
-          short_message smsg = (short_message)CmiAlloc(sizeof(struct shortMsg));
+          int smsg_size = 4+CmiMsgHeaderSizeBytes;
+          message smsg = (message)CmiAlloc(smsg_size);
           CmiSetHandler(smsg, CpvAccess(shortmsg_index));
-          CmiSyncSendAndFree(pe, sizeof(struct shortMsg), smsg);
+          CmiSyncSendAndFree(pe, smsg_size, smsg);
         }
       }
     }
@@ -149,9 +131,9 @@ void bigmsg_moduleinit(int argc, char **argv)
   CpthreadModuleInit();
   CpmInitializeThisModule();
   // Set runtime cpuaffinity
-//  CmiInitCPUAffinity(argv);
+  CmiInitCPUAffinity(argv);
   // Initialize CPU topology
-//  CmiInitCPUTopology(argv);
+  CmiInitCPUTopology(argv);
   // Wait for all PEs of the node to complete topology init
   CmiNodeAllBarrier();
 
