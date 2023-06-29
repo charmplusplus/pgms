@@ -34,7 +34,7 @@ CpmInvokable bigmsg_stop()
   CsdExitScheduler();
 }
 
-void send() {
+void send_msg() {
   int i, k;
   double start_time, crt_time;
   struct myMsg *msg;
@@ -58,7 +58,7 @@ void shortmsg_handler(void *vmsg) {
   short_message smsg = (short_message)vmsg;
   CmiFree(smsg);
   CpvAccess(msg_size) = (CpvAccess(msg_size)-CmiMsgHeaderSizeBytes)*2+CmiMsgHeaderSizeBytes;
-  send();
+  send_msg();
 }
 
 void bigmsg_handler(void *vmsg)
@@ -120,7 +120,7 @@ void bigmsg_init()
     Cpm_bigmsg_stop(CpmSend(CpmALL));
   } else {
     if(CmiMyPe() < pes_per_node)
-      send();
+      send_msg();
   }
 }
 
