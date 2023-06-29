@@ -4,6 +4,9 @@
 #include "bigmsg.cpm.h"
 
 CpvDeclare(int, bigmsg_index);
+CpvDeclare(int, shortmsg_index);
+CpvDeclare(int, msg_size);
+CpvDeclare(int, cycle);
 CpvDeclare(int, recv_count);
 CpvDeclare(int, ack_count);
 CpvDeclare(double, total_time);
@@ -12,57 +15,102 @@ CpvDeclare(double, send_time);
 
 #define MSG_SIZE 8
 #define MSG_COUNT 100
+#define nCycles 8
 
 typedef struct myMsg
 {
   char header[CmiMsgHeaderSizeBytes];
-  int payload[MSG_SIZE];
+  int payload[1];
 } *message;
+
+typedef struct shortMsg
+{ 
+  char header[CmiMsgHeaderSizeBytes];
+  int dummy;
+} *short_message;
 
 CpmInvokable bigmsg_stop()
 {
   CsdExitScheduler();
 }
 
+void send() {
+  int i, k;
+  double start_time, crt_time;
+  struct myMsg *msg;
+//  CmiPrintf("\nSending msg fron pe%d to pe%d\n",CmiMyPe(), CmiNumPes()/2+CmiMyPe());
+  for(k=0;k<MSG_COUNT;k++) {
+    crt_time = CmiWallTimer();
+    msg = (message)CmiAlloc(CpvAccess(msg_size)/*sizeof(struct myMsg)*/);
+    //for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
+    CmiSetHandler(msg, CpvAccess(bigmsg_index));
+    CpvAccess(process_time) = CmiWallTimer() - crt_time + CpvAccess(process_time);
+    start_time = CmiWallTimer();
+    //Send from my pe-i on node-0 to q+i on node-1
+    CmiSyncSendAndFree(CmiNumPes()/2+CmiMyPe(), CpvAccess(msg_size)/*sizeof(struct myMsg)*/, msg);
+    CpvAccess(send_time) = CmiWallTimer() - start_time + CpvAccess(send_time);
+  }
+}
+
+
+void shortmsg_handler(void *vmsg) {
+//  CmiPrintf("\nShort msg received on PE %d", CmiMyPe());
+  short_message smsg = (short_message)vmsg;
+  CmiFree(smsg);
+  CpvAccess(msg_size) = (CpvAccess(msg_size)-CmiMsgHeaderSizeBytes)*2+CmiMsgHeaderSizeBytes;
+  send();
+}
 
 void bigmsg_handler(void *vmsg)
 {
-  int i, next;
+  int i, next, pe;
   message msg = (message)vmsg;
   if (CmiMyPe()>=CmiNumPes()/2) {
     CpvAccess(recv_count) = 1 + CpvAccess(recv_count);
     if(CpvAccess(recv_count) == MSG_COUNT) {
-      CmiPrintf("\nTesting recvd data on rank %d", CmiMyRank());
+      CpvAccess(recv_count) = 0;
+//      CmiPrintf("\nTesting recvd data on rank %d", CmiMyRank());
+/*
       for (i=0; i<MSG_SIZE; i++) {
-        if (msg->payload[i] != i) {
+        //if (msg->payload[i] != i) 
+        {
           CmiPrintf("Failure in bigmsg test, data corrupted.\n");
           exit(1);
         }
       }
+*/
       CmiFree(msg);
-      msg = (message)CmiAlloc(sizeof(struct myMsg));
-      for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
+      msg = (message)CmiAlloc(CpvAccess(msg_size)/*sizeof(struct myMsg)*/);
+//      for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
       CmiSetHandler(msg, CpvAccess(bigmsg_index));
-      CmiSyncSendAndFree(0, sizeof(struct myMsg), msg);
+      CmiSyncSendAndFree(0, CpvAccess(msg_size)/*sizeof(struct myMsg)*/, msg);
     } else
       CmiFree(msg);
   } else { //Pe-0 receives all acks
     CpvAccess(ack_count) = 1 + CpvAccess(ack_count);
     if(CpvAccess(ack_count) == CmiNumPes()/2) {
+      CpvAccess(ack_count) = 0;
       CpvAccess(total_time) = CmiWallTimer() - CpvAccess(total_time);
-      CmiPrintf("\nReceived ack on PE-#%d send time=%lf, process time=%lf, total time=%lf",
-              CmiMyPe(), CpvAccess(send_time), CpvAccess(process_time), CpvAccess(total_time));
+      CmiPrintf("\nReceived [Cycle=%d, msg size=%d] ack on PE-#%d send time=%lf, process time=%lf, total time=%lf",
+              CpvAccess(cycle), CpvAccess(msg_size), CmiMyPe(), CpvAccess(send_time), CpvAccess(process_time), CpvAccess(total_time));
       CmiFree(msg);
-      Cpm_bigmsg_stop(CpmSend(CpmALL));
+      CpvAccess(cycle) = CpvAccess(cycle)+1;
+      if(CpvAccess(cycle) == nCycles)
+        Cpm_bigmsg_stop(CpmSend(CpmALL));
+      else {
+ //       CmiPrintf("\nSending short msgs from PE-%d", CmiMyPe());
+        for(pe=0;pe<CmiNumPes()/2;pe++) {
+          short_message smsg = (short_message)CmiAlloc(sizeof(struct shortMsg));
+          CmiSetHandler(smsg, CpvAccess(shortmsg_index));
+          CmiSyncSendAndFree(pe, sizeof(struct shortMsg), smsg);
+        }
+      }
     }
   }
 }
 
 void bigmsg_init()
 {
-  int i, k;
-  double start_time, crt_time;
-  struct myMsg *msg;
   int totalpes = CmiNumPes(); //p=num_pes
   int pes_per_node = totalpes/2; //q=p/2
   if (CmiNumPes()%2 !=0) {
@@ -71,26 +119,17 @@ void bigmsg_init()
     CsdExitScheduler();
     Cpm_bigmsg_stop(CpmSend(CpmALL));
   } else {
-    if(CmiMyPe() < pes_per_node) {
-      CmiPrintf("\nSending msg fron pe%d to pe%d\n",CmiMyPe(), CmiMyNodeSize()+CmiMyRank());
-      for(k=0;k<MSG_COUNT;k++) {
-        crt_time = CmiWallTimer();
-        msg = (message)CmiAlloc(sizeof(struct myMsg));
-        for (i=0; i<MSG_SIZE; i++) msg->payload[i] = i;
-        CmiSetHandler(msg, CpvAccess(bigmsg_index));
-        CpvAccess(process_time) = CmiWallTimer() - crt_time + CpvAccess(process_time);
-        start_time = CmiWallTimer();
-        //Send from my pe-i on node-0 to q+i on node-1
-        CmiSyncSendAndFree(pes_per_node+CmiMyPe(), sizeof(struct myMsg), msg);
-        CpvAccess(send_time) = CmiWallTimer() - start_time + CpvAccess(send_time);
-      }
-    }
+    if(CmiMyPe() < pes_per_node)
+      send();
   }
 }
 
 void bigmsg_moduleinit(int argc, char **argv)
 {
   CpvInitialize(int, bigmsg_index);
+  CpvInitialize(int, shortmsg_index);
+  CpvInitialize(int, msg_size);
+  CpvInitialize(int, cycle);
   CpvInitialize(int, recv_count);
   CpvInitialize(int, ack_count);
   CpvInitialize(double, total_time);
@@ -98,6 +137,9 @@ void bigmsg_moduleinit(int argc, char **argv)
   CpvInitialize(double, process_time);
 
   CpvAccess(bigmsg_index) = CmiRegisterHandler(bigmsg_handler);
+  CpvAccess(shortmsg_index) = CmiRegisterHandler(shortmsg_handler);
+  CpvAccess(msg_size) = 16+CmiMsgHeaderSizeBytes;
+  CpvAccess(cycle) = 1;
   void CpmModuleInit(void);
   void CfutureModuleInit(void);
   void CpthreadModuleInit(void);
@@ -107,9 +149,9 @@ void bigmsg_moduleinit(int argc, char **argv)
   CpthreadModuleInit();
   CpmInitializeThisModule();
   // Set runtime cpuaffinity
-  CmiInitCPUAffinity(argv);
+//  CmiInitCPUAffinity(argv);
   // Initialize CPU topology
-  CmiInitCPUTopology(argv);
+//  CmiInitCPUTopology(argv);
   // Wait for all PEs of the node to complete topology init
   CmiNodeAllBarrier();
 
