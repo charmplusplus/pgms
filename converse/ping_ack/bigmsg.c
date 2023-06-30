@@ -33,14 +33,17 @@ void send_msg() {
   double start_time, crt_time;
   struct myMsg *msg;
 //  CmiPrintf("\nSending msg fron pe%d to pe%d\n",CmiMyPe(), CmiNumPes()/2+CmiMyPe());
+  CpvAccess(process_time) = 0.0;
+  CpvAccess(send_time) = 0.0;
+  CpvAccess(total_time) = CmiWallTimer();
   for(k=0;k<MSG_COUNT;k++) {
     crt_time = CmiWallTimer();
-    msg = (message)CmiAlloc(CpvAccess(msg_size)/*sizeof(struct myMsg)*/);
+    msg = (message)CmiAlloc(CpvAccess(msg_size));
     CmiSetHandler(msg, CpvAccess(bigmsg_index));
     CpvAccess(process_time) = CmiWallTimer() - crt_time + CpvAccess(process_time);
     start_time = CmiWallTimer();
     //Send from my pe-i on node-0 to q+i on node-1
-    CmiSyncSendAndFree(CmiNumPes()/2+CmiMyPe(), CpvAccess(msg_size)/*sizeof(struct myMsg)*/, msg);
+    CmiSyncSendAndFree(CmiNumPes()/2+CmiMyPe(), CpvAccess(msg_size), msg);
     CpvAccess(send_time) = CmiWallTimer() - start_time + CpvAccess(send_time);
   }
 }
