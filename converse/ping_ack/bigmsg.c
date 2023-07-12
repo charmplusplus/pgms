@@ -18,6 +18,7 @@ CpvDeclare(double, process_time);
 CpvDeclare(double, send_time);
 
 #define MSG_COUNT 100
+
 #define nMSG_SIZE 3                   // if the msg_sizes are hard_coded, this should be the same as the length of the hard coded array
 #define nTRIALS_PER_SIZE 10
 #define CALCULATION_PRECISION 0.0001  // the decimal place that the output data is rounded to
@@ -28,6 +29,7 @@ double send_time[nTRIALS_PER_SIZE];
 
 
 int msg_sizes[nMSG_SIZE] = {56, 4096, 65536}; // hard coded msg_size values
+
 
 
 
@@ -98,6 +100,33 @@ CpmInvokable bigmsg_stop()
   CsdExitScheduler();
 }
 
+void send_msg() {
+  int i, k;
+  double start_time, crt_time;
+  struct myMsg *msg;
+//  CmiPrintf("\nSending msg fron pe%d to pe%d\n",CmiMyPe(), CmiNumPes()/2+CmiMyPe());
+  CpvAccess(process_time) = 0.0;
+  CpvAccess(send_time) = 0.0;
+  CpvAccess(total_time) = CmiWallTimer();
+  for(k=0;k<MSG_COUNT;k++) {
+    crt_time = CmiWallTimer();
+    msg = (message)CmiAlloc(CpvAccess(msg_size));
+    CmiSetHandler(msg, CpvAccess(bigmsg_index));
+    CpvAccess(process_time) = CmiWallTimer() - crt_time + CpvAccess(process_time);
+    start_time = CmiWallTimer();
+    //Send from my pe-i on node-0 to q+i on node-1
+    CmiSyncSendAndFree(CmiNumPes()/2+CmiMyPe(), CpvAccess(msg_size), msg);
+    CpvAccess(send_time) = CmiWallTimer() - start_time + CpvAccess(send_time);
+  }
+}
+
+
+void shortmsg_handler(void *vmsg) {
+  message smsg = (message)vmsg;
+  CmiFree(smsg);
+  CpvAccess(msg_size) = (CpvAccess(msg_size)-CmiMsgHeaderSizeBytes)*2+CmiMsgHeaderSizeBytes;
+  send_msg();
+}
 
 
 void send_msg() {
@@ -163,7 +192,7 @@ void do_work(long start, long end, void *result) {
 
 void bigmsg_handler(void *vmsg)
 {
-  int i, next;
+  int i, next, pe;
   message msg = (message)vmsg;
   // if this is a receiving PE
   if (CmiMyPe() >= CmiNumPes() / 2) {
@@ -188,7 +217,6 @@ void bigmsg_handler(void *vmsg)
     //   CmiPrintf("Calculation OK\n"); // DEBUG: Computation Check
     if(CpvAccess(recv_count) == MSG_COUNT) {
       CpvAccess(recv_count) = 0;
-      
       CmiFree(msg);
       msg = (message)CmiAlloc(CpvAccess(msg_size));
       CmiSetHandler(msg, CpvAccess(ackmsg_index));
